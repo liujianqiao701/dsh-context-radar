@@ -1,0 +1,62 @@
+{
+  "name": "dsh-context-radar",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DSH 上下文雷达插件：算出当前上下文里系统提示词各段 / AGENTS.md 各文件 / 每个 skill / 每条工具结果各占多少 token 与百分比，判定上下文是否膨胀并给出可执行建议；含 CLI 式工具、/ctx 命令、超阈值自动提醒与 GUI 面板数据接口。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "context",
+    "token",
+    "context-window",
+    "context-pressure",
+    "observability",
+    "prompt-budget"
+  ],
+  "author": "liujianqiao",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liujianqiao701/dsh-context-radar.git"
+  },
+  "homepage": "https://github.com/liujianqiao701/dsh-context-radar#readme",
+  "bugs": {
+    "url": "https://github.com/liujianqiao701/dsh-context-radar/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./engine": "./lib/engine.js",
+    "./estimate": "./lib/estimate.js",
+    "./render": "./lib/render.js",
+    "./collect": "./lib/collect.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "test",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/engine.test.mjs && node test/render.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "engines": {
+      "dsh": "*"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

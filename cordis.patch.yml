@@ -1,0 +1,8 @@
+# dsh-context-radar bundle patch: 挂载「上下文雷达」插件。
+#
+# 宿主侧（host）注册：`context_radar` 工具、`/ctx` `/ctx-watch` 命令、
+# 「上下文膨胀提醒」提示词段落（只在超阈值时注入）、以及 GUI 面板的数据路由
+# `/api/dsh-context-radar/report`。
+- insert:
+    - id: context-radar
+      name: 'dsh-context-radar'
