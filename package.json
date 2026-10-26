@@ -1,6 +1,6 @@
 {
   "name": "dsh-context-radar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "DSH 上下文雷达插件：算出当前上下文里系统提示词各段 / AGENTS.md 各文件 / 每个 skill / 每条工具结果各占多少 token 与百分比，判定上下文是否膨胀并给出可执行建议；含 CLI 式工具、/ctx 命令、超阈值自动提醒与 GUI 面板数据接口。",
   "keywords": [
