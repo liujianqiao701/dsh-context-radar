@@ -36,6 +36,7 @@
     "./estimate": "./lib/estimate.js",
     "./render": "./lib/render.js",
     "./collect": "./lib/collect.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -46,11 +47,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/engine.test.mjs && node test/render.test.mjs"
+    "test": "node test/engine.test.mjs && node test/render.test.mjs && node test/install.test.mjs && node test/client.test.mjs"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     },
     "engines": {
       "dsh": "*"
