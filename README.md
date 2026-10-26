@@ -163,6 +163,14 @@ dsh plugin --profile desktop add link:<插件目录>
 | 事件形状 | `user/message` 的 **`data` 本身就是消息**；`assistant` / `tool/result` / `system` 才是 `data.message` | 只认一种 → 按文档归因全部落空，还不报错 |
 | 会话画布 | 压缩**不删日志**，必须吃 `surface.deriveMessages()` | 遍历原始事件 → 算出物理上不可能的占用（实测 2751%） |
 | 绝对用量 | 锚在 `assistant/message` 的 `data.usage.totalTokens` | 纯本地估算 → 与实际账单差一个量级 |
+| **客户端 `apply` 时序** | 客户端插件 factory 必须导出 **`inject: ['slots']`**，并且 `package.json` 的 `dsh.client.inject` 要声明 `@deepseek-ai/dsh-client-ui-slots` | cordis 会在 slots 服务挂载**之前**就调 `apply` → `ctx.slots` 取不到 → **没有徽标，也没有任何报错**，页面安安静静 |
+| **前端取色** | 用 CSS 系统色 `Canvas` / `CanvasText`，**不要**用主题变量配硬编码回退 | `--dsw-alias-bg-primary` 实测**未定义**（回落到 `#fff` 白底），`--dsw-alias-label-primary` 在暗色主题下是 `#f9fafb` → **白底白字，面板整片看不见** |
+| **插槽要等会话** | `conversation.session.header.actions` 只在**有会话打开**时渲染；空态（新建会话还没消息）不显示 | 在空页面上看不到徽标，误判成"没注册上" |
+| **`slots.register` 语义** | 返回 `true` **只代表注册调用成功**，不代表渲染出来了 | 拿"注册成功"当"已生效" → 排查方向全错（本次实测：`registered: true` 而徽标已渲染，两者要分开验证） |
+
+> 自检入口：DevTools 里看 `window.__contextRadar` —— `{ factoryRan, applyCalled, slotsType, registered, error }`，
+> 一眼定位是"没加载 / 没调 apply / 拿不到 slots / 注册失败"哪一步断的。
+
 
 ## License
 
