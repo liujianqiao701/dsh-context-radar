@@ -114,6 +114,29 @@ dsh plugin --profile desktop add link:<插件目录>
 
 **改动后必须重启 DSH** 才会加载。
 
+### GUI 面板（会话头部徽标 → 弹窗）
+
+插件带一个客户端半身（`lib/client.js`）。它往 `conversation.session.header.actions` 插槽注册一个**占用率徽标**，
+点开是完整排行榜面板：占用率进度条、前 15 项（类别 / 来源 / token / 占已用 / 占窗口 + 条形图）、硬告警与建议。
+每 30 秒自动刷新，数据取自同源的 `/api/dsh-context-radar/report`。
+
+**不需要构建步骤。** DSH 前端模块 ABI 是 `window.__ModuleLoader__.load({ id, factory })`，
+`factory(require)` 返回 `{ apply, inject }`，`apply(ctx)` 里用 `ctx.get('slots')` 注册组件。
+参考实现（dsh-cost-meter / dsh-better-sidebar）都是 esbuild 预打包的产物，但打包的源码本身也是这个 ABI ——
+所以这里直接手写纯 JS（只用 `React.createElement`，不碰 JSX/TS），省掉一层构建依赖。
+
+包声明要**两处同时**满足，缺一个宿主就不认：
+
+```jsonc
+{ "exports": { "./client": "./lib/client.js" },
+  "dsh": { "client": { "platform": "web" } } }
+```
+
+缺 `exports["./client"]` → `declares dsh.client but exports no "./client" bundle`；
+`__ModuleLoader__.load` 的 `id` 必须等于包名，否则 → `loaded without registering "<id>"`。
+
+> 客户端模块由宿主**启动时**扫描所有声明了 `dsh.client` 的包，**改完客户端代码必须重启 DSH**。
+
 ### 已知限制
 
 - token 数是**估算**，不是分词器实测值。中文取 1 字符 1 token 是**有意偏保守**（宁可早报，不可漏报）；
