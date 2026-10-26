@@ -69,6 +69,9 @@ function fakeCtx({ withSlots = true } = {}) {
     },
   }
   const ctx = {
+    // 真实客户端 ctx 上 `slots` 是服务属性（better-sidebar 就用 ctx.slots.register）；
+    // `get('slots')` 是备用路径。两条都给，确保实现走哪条都成立。
+    slots: withSlots ? slots : undefined,
     get: (name) => (name === 'slots' && withSlots ? slots : undefined),
     effect: (fn) => {
       recorded.effects += 1
@@ -87,6 +90,22 @@ test('包声明：dsh.client 与 exports["./client"] 都在（缺一个加载器
   // 加载器原话：`declares dsh.client but exports no "./client" bundle`
   assert.equal(pkg.exports['./client'], './lib/client.js', 'exports["./client"] 必须指向真实文件')
   assert.ok(fs.existsSync(path.join(root, 'lib', 'client.js')), '客户端文件必须存在')
+  // 槽服务由这个模块提供；不声明就可能在本模块 apply 时还没挂载
+  const inject = pkg.dsh.client.inject || []
+  assert.ok(
+    inject.includes('@deepseek-ai/dsh-client-ui-slots'),
+    `dsh.client.inject 必须含 @deepseek-ai/dsh-client-ui-slots，实际 ${JSON.stringify(inject)}`,
+  )
+})
+
+test('导出的 inject 必须含 "slots"（漏了 cordis 会在服务还没挂载时就调 apply → 面板静默消失）', () => {
+  const calls = loadClient()
+  const mod = calls[0].factory((name) => {
+    if (name === 'react') return fakeReact()
+    throw new Error(`未预期的 require: ${name}`)
+  })
+  assert.ok(Array.isArray(mod.inject), 'inject 应当是数组')
+  assert.ok(mod.inject.includes('slots'), `inject 必须含 "slots"，实际 ${JSON.stringify(mod.inject)}`)
 })
 
 test('ABI：window.__ModuleLoader__.load 被调用一次，且 id 等于包名', () => {
