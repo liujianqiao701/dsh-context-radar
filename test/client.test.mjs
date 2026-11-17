@@ -158,3 +158,25 @@ test('客户端只依赖 react（不多要任何 @deepseek-ai 包，link 安装�
   const unique = [...new Set(required)]
   assert.deepEqual(unique, ['react'], `客户端只应 require react，实际 ${unique.join(', ')}`)
 })
+
+/**
+ * 回归测试：面板曾经是「插槽内 position:fixed + inset:0 + zIndex:2147483000」，
+ * 实机只露出卡片首行、下面整块被会话内容压住 —— 因为徽标挂在
+ * `conversation.session.header.actions` 这条很窄的头部条里，祖先的
+ * `overflow:hidden` 会裁掉 fixed 子元素，祖先的层叠上下文又会把超大 zIndex 关在里面。
+ *
+ * 正确解法是原生 `<dialog>` + `showModal()`：它进浏览器 **top layer**，
+ * 不参与任何祖先的层叠上下文，也不被祖先 overflow 裁切。
+ * 这条测试就是防退回：谁要是把手写 overlay 加回 fixed + 大 zIndex，这里立刻红。
+ */
+test('面板必须进 top layer（<dialog> + showModal），不许回到插槽内 fixed + 超大 zIndex', () => {
+  const source = fs.readFileSync(clientPath, 'utf8')
+  assert.match(source, /return h\(\s*'dialog',/, '面板根节点必须是 <dialog>')
+  assert.match(source, /showModal\s*\(/, '必须调用 dialog.showModal() 才能进 top layer')
+  assert.match(source, /::backdrop/, 'dim 背景要靠 ::backdrop（内联 style 设不了伪元素）')
+  assert.doesNotMatch(
+    source,
+    /zIndex:\s*2147483000/,
+    '不要用超大 zIndex 硬压 —— 它在祖先层叠上下文内部无效，会被会话内容盖住',
+  )
+})
