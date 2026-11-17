@@ -124,6 +124,20 @@ dsh plugin --profile desktop add link:<插件目录>
 `overflow` / 层叠上下文影响；Esc、点遮罩、点「关闭」都会收起。`0.2.1` 修的正是这一条 ——
 `0.2.0` 用的是插槽内 `position:fixed` 大弹层，实机只露得出卡片首行。
 
+`0.2.2` 又按一轮 UI 复审补了几处：
+
+- **没数据不再冒充绿灯**：接口 401 / 网络失败 / 没有可用会话时，徽标与面板显示 `⚪ 未知（没有可用数据）`，
+  而不是默认回落到 `ok` 显示「🟢 健康」——那比打不开还误导。
+- **状态文字改用 `CanvasText`**：等级色只给圆点 / 进度条 / 边框。实测亮色主题底是 `#fff`，
+  而 `#22c55e` / `#eab308` 在白底上对比度只有 2.3:1 / 1.9:1，13px 小字基本糊掉。
+- **遮罩改用 DSH 自己的 token**：`--dsw-alias-bg-mask-1` + `--dsw-mask-blur`。原先硬编码
+  `rgba(0,0,0,.45)`，而 DSH 的弹窗是 `.24`(亮)/`.5`(暗)，亮色下我们会比全站弹窗暗近一倍。
+- **Esc 只在面板打开时拦截**，且 `preventDefault` + `stopPropagation`（capture 阶段），
+  不再连带触发 DSH 的全局 Esc（停止生成等）。
+- **修掉「未打开就挡住整页」**：`dialog` 的内联样式里**绝不能**写 `display`，否则会盖掉 UA 的
+  `dialog:not([open]){display:none}`，让全屏透明层在 `showModal()` 之前就渲染出来吃点击。
+- 条形图缩进 122 → 130，真正对齐「来源」列。
+
 **不需要构建步骤。** DSH 前端模块 ABI 是 `window.__ModuleLoader__.load({ id, factory })`，
 `factory(require)` 返回 `{ apply, inject }`，`apply(ctx)` 里用 `ctx.get('slots')` 注册组件。
 参考实现（dsh-cost-meter / dsh-better-sidebar）都是 esbuild 预打包的产物，但打包的源码本身也是这个 ABI ——
@@ -169,6 +183,8 @@ dsh plugin --profile desktop add link:<插件目录>
 | 绝对用量 | 锚在 `assistant/message` 的 `data.usage.totalTokens` | 纯本地估算 → 与实际账单差一个量级 |
 | **客户端 `apply` 时序** | 客户端插件 factory 必须导出 **`inject: ['slots']`**，并且 `package.json` 的 `dsh.client.inject` 要声明 `@deepseek-ai/dsh-client-ui-slots` | cordis 会在 slots 服务挂载**之前**就调 `apply` → `ctx.slots` 取不到 → **没有徽标，也没有任何报错**，页面安安静静 |
 | **面板别用插槽内 `position:fixed`** | 徽标在 `conversation.session.header.actions` 这条很窄的头部条里；面板必须用原生 `<dialog>` + `showModal()` 进 **top layer** | 祖先的 `overflow:hidden` 会裁掉 `fixed` 子元素，祖先的层叠上下文又会把超大 `zIndex` 关在里面 → **只露出卡片首行，下面整块被会话内容压住**（看起来像"详情被遮挡"，其实是"被裁掉了"） |
+| **`dialog` 内联样式不许写 `display`** | 未打开时的不可见全靠 UA 的 `dialog:not([open]){display:none}`；内联 `display:flex` 会覆盖它 | dialog 在 `showModal()` **之前**就以全屏透明 `fixed` 层渲染，把下面的页面点击全吃掉；`showModal` 失败时更是永久挂着 |
+| **Esc 别漏 `stopPropagation`** | 面板的 keydown 要用 **capture** 阶段，并且 `preventDefault` + `stopPropagation` | 关面板的同时宿主也收到这次 Esc → 顺带触发了 DSH 的全局 Esc（停止生成 / 关菜单） |
 | **前端取色** | 用 CSS 系统色 `Canvas` / `CanvasText`，**不要**用主题变量配硬编码回退 | `--dsw-alias-bg-primary` 实测**未定义**（回落到 `#fff` 白底），`--dsw-alias-label-primary` 在暗色主题下是 `#f9fafb` → **白底白字，面板整片看不见** |
 | **插槽要等会话** | `conversation.session.header.actions` 只在**有会话打开**时渲染；空态（新建会话还没消息）不显示 | 在空页面上看不到徽标，误判成"没注册上" |
 | **`slots.register` 语义** | 返回 `true` **只代表注册调用成功**，不代表渲染出来了 | 拿"注册成功"当"已生效" → 排查方向全错（本次实测：`registered: true` 而徽标已渲染，两者要分开验证） |

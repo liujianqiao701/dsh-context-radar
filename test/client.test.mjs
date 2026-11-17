@@ -37,7 +37,7 @@ function fakeReact() {
 }
 
 /** 加载 client.js（它是经典脚本，靠 window 全局），返回捕获到的 load 调用。 */
-function loadClient() {
+function loadClient({ documentStub } = {}) {
   const source = fs.readFileSync(clientPath, 'utf8')
   const calls = []
   const fakeWindow = {
@@ -47,9 +47,10 @@ function loadClient() {
     setInterval: () => 0,
     clearInterval: () => {},
   }
+  const doc = documentStub || { addEventListener: () => {}, removeEventListener: () => {} }
   // 用 Function 求值：不经过 ESM 解析，等价于浏览器里作为脚本执行
   const run = new Function('window', 'document', 'fetch', source)
-  run(fakeWindow, { addEventListener: () => {}, removeEventListener: () => {} }, () => {
+  run(fakeWindow, doc, () => {
     throw new Error('测试里不该真的发请求')
   })
   return calls
@@ -179,4 +180,195 @@ test('面板必须进 top layer（<dialog> + showModal），不许回到插槽�
     /zIndex:\s*2147483000/,
     '不要用超大 zIndex 硬压 —— 它在祖先层叠上下文内部无效，会被会话内容盖住',
   )
+})
+
+// ---------------------------------------------------------------------------
+// 行为测试：上面那条只断言源码里有字符串，删掉 onCancel 也照样能过。
+// 下面这组**真的执行组件**，把 showModal / close / Esc / 无数据文案 钉死。
+// ---------------------------------------------------------------------------
+
+/**
+ * 能真正「渲染」的假 React：createElement 返回可遍历的树，useEffect 把回调收进数组。
+ * 第一次 useState 是 RadarBadge 的 `open`，让它为 true 才能把面板渲染出来。
+ */
+function fakeReactForRender() {
+  const effects = []
+  let stateCalls = 0
+  return {
+    Fragment: Symbol.for('react.fragment'),
+    createElement: (type, props, ...children) => ({
+      type,
+      props: props || {},
+      children: children.flat(Infinity).filter((c) => c !== null && c !== undefined),
+    }),
+    useState: (initial) => {
+      const n = stateCalls++
+      const value = n === 0 ? true : typeof initial === 'function' ? initial() : initial
+      return [value, () => {}]
+    },
+    useEffect: (fn) => {
+      effects.push(fn)
+    },
+    useRef: (value) => ({ current: value }),
+    useMemo: (fn) => fn(),
+    useCallback: (fn) => fn,
+    __effects: effects,
+  }
+}
+
+/** 取树里所有文本（用于断言文案）。 */
+function textOf(node) {
+  if (typeof node === 'string') return node
+  if (!node || !node.children) return ''
+  return node.children.map(textOf).join('')
+}
+
+/** 用给定的假 React 与假 document 加载 client.js，并拿回注册进插槽的组件。 */
+function mountBadge() {
+  const React = fakeReactForRender()
+  const listeners = []
+  const documentStub = {
+    addEventListener: (type, fn, options) => listeners.push({ type, fn, options }),
+    removeEventListener: (type, fn) => {
+      const index = listeners.findIndex((l) => l.type === type && l.fn === fn)
+      if (index >= 0) listeners.splice(index, 1)
+    },
+  }
+  const calls = loadClient({ documentStub })
+  const mod = calls[0].factory((name) => {
+    if (name === 'react') return React
+    throw new Error(`未预期的 require: ${name}`)
+  })
+  const { ctx, recorded } = fakeCtx()
+  mod.apply(ctx)
+  return { React, component: recorded.registered[0].component, listeners }
+}
+
+/** 把面板单独渲染出来，返回它的 dialog 树、effect 列表与 spy。 */
+function renderPanel({ data = null, error = 'HTTP 401', loading = false } = {}) {
+  const { React, component, listeners } = mountBadge()
+  const badgeTree = component()
+  const panelEl = badgeTree.children.find((child) => typeof child.type === 'function')
+  assert.ok(panelEl, '打开状态下必须渲染出面板组件')
+
+  const onCloseCalls = []
+  const onClose = () => onCloseCalls.push(true)
+  const before = React.__effects.length
+  const dialogTree = panelEl.type({ state: { loading, data, error }, onClose })
+  const effects = React.__effects.slice(before)
+
+  return { dialogTree, effects, onClose, onCloseCalls, listeners }
+}
+
+/** 假 dialog 元素：记录 showModal / close 是否被调用。 */
+function makeFakeDialog() {
+  return {
+    open: false,
+    style: {},
+    showModalCalls: 0,
+    closeCalls: 0,
+    showModal() {
+      this.showModalCalls += 1
+      this.open = true
+    },
+    close() {
+      this.closeCalls += 1
+      this.open = false
+    },
+    setAttribute() {
+      this.open = true
+    },
+  }
+}
+
+test('行为：面板根节点是 dialog，且 style 里不许有内联 display（否则未打开就挡住整页）', () => {
+  const { dialogTree } = renderPanel()
+  assert.equal(dialogTree.type, 'dialog')
+  assert.equal(dialogTree.props.role, 'dialog')
+  assert.equal(
+    dialogTree.props.style.display,
+    undefined,
+    '内联 display 会盖掉 UA 的 dialog:not([open]){display:none} → 未打开时以全屏透明层吃掉点击',
+  )
+  assert.equal(typeof dialogTree.props.onCancel, 'function', '必须处理原生 Esc(cancel)')
+})
+
+test('行为：挂载时调用 showModal()，卸载时 close()', () => {
+  const { dialogTree, effects } = renderPanel()
+  const fakeDialog = makeFakeDialog()
+  dialogTree.props.ref.current = fakeDialog
+
+  const cleanup = effects[0]()
+  assert.equal(fakeDialog.showModalCalls, 1, '必须调用 showModal() 才能进 top layer')
+  assert.equal(fakeDialog.open, true)
+
+  assert.equal(typeof cleanup, 'function', 'showModal 成功后要返回清理函数')
+  cleanup()
+  assert.equal(fakeDialog.closeCalls, 1, '卸载时必须 close()')
+  assert.equal(fakeDialog.open, false)
+})
+
+test('行为：onCancel 拦掉原生 Esc —— preventDefault + onClose 都要发生', () => {
+  const { dialogTree, onCloseCalls } = renderPanel()
+  let prevented = 0
+  dialogTree.props.onCancel({ preventDefault: () => { prevented += 1 } })
+  assert.equal(prevented, 1, '不 preventDefault 的话 dialog 会被原生关掉，而 React 的 open 仍是 true → 再点徽标没反应')
+  assert.equal(onCloseCalls.length, 1, '必须走 onClose 让状态和 DOM 一起收')
+})
+
+test('行为：Esc 只在面板打开时被拦截，且会 preventDefault + stopPropagation', () => {
+  const { dialogTree, effects, onCloseCalls, listeners } = renderPanel()
+  const fakeDialog = makeFakeDialog()
+  dialogTree.props.ref.current = fakeDialog
+
+  const dispose = effects[1]() // 第二个 effect 是 keydown 监听
+  const entry = listeners.find((l) => l.type === 'keydown')
+  assert.ok(entry, '必须注册 keydown')
+  assert.equal(entry.options, true, '要用 capture 阶段，否则抢不过宿主的全局快捷键')
+
+  // 面板没开：不许拦，DSH 全局 Esc 得照常工作
+  fakeDialog.open = false
+  let prevented = 0
+  let stopped = 0
+  entry.fn({ key: 'Escape', preventDefault: () => { prevented += 1 }, stopPropagation: () => { stopped += 1 } })
+  assert.equal(onCloseCalls.length, 0, '面板没开时不该关任何东西')
+  assert.equal(prevented, 0)
+
+  // 面板开着：拦下来并关掉
+  fakeDialog.open = true
+  entry.fn({ key: 'Escape', preventDefault: () => { prevented += 1 }, stopPropagation: () => { stopped += 1 } })
+  assert.equal(onCloseCalls.length, 1)
+  assert.equal(prevented, 1)
+  assert.equal(stopped, 1, '不 stopPropagation 的话宿主也会收到这次 Esc')
+
+  if (typeof dispose === 'function') dispose()
+})
+
+test('行为：没有数据时不许显示成「健康」（接口失败不能被当成绿灯）', () => {
+  const { dialogTree } = renderPanel({ data: null, error: '接口需要登录态（HTTP 401）' })
+  const text = textOf(dialogTree)
+  assert.match(text, /未知/, '没有判定时必须说「未知」')
+  assert.doesNotMatch(text, /🟢|健康/, '没有数据时不许出现「健康」/绿灯')
+  assert.match(text, /读取失败/, '错误原因要显示出来')
+})
+
+test('行为：有数据时才显示等级，且遮罩用 DSH 主题 token', () => {
+  const data = {
+    ok: true,
+    window: { contextTokens: 100000, pressureTokens: 26000, ratio: 0.26, remaining: 74000 },
+    scoring: { level: 'ok', score: 26 },
+    items: [{ kind: 'tool', label: 'read', tokens: 1200, pctOfUsed: 0.1, pctOfWindow: 0.012 }],
+    suggestions: [],
+    alerts: [],
+  }
+  const { dialogTree } = renderPanel({ data, error: null })
+  const text = textOf(dialogTree)
+  assert.match(text, /健康/)
+  assert.match(text, /风险分 26\/100/)
+
+  const styleNode = dialogTree.children.find((child) => child.type === 'style')
+  assert.ok(styleNode, '遮罩样式必须由 <style> 子节点提供（内联 style 设不了 ::backdrop）')
+  const css = textOf(styleNode)
+  assert.match(css, /::backdrop/)
+  assert.match(css, /--dsw-alias-bg-mask-1/, '遮罩要用 DSH 的 token，别硬编码 —— 否则亮色主题比全站弹窗暗一倍')
 })
